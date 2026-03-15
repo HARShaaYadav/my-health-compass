@@ -4,6 +4,9 @@ import { Stethoscope, Plus, X, AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 const commonSymptoms = ["Fever", "Headache", "Cough", "Fatigue", "Nausea", "Body Pain", "Sore Throat", "Dizziness", "Chest Pain", "Shortness of Breath"];
 
@@ -14,25 +17,6 @@ interface AnalysisResult {
   description: string;
 }
 
-const mockAnalyze = (symptoms: string[]): AnalysisResult[] => {
-  const lower = symptoms.map(s => s.toLowerCase());
-  const results: AnalysisResult[] = [];
-
-  if (lower.includes("chest pain") || lower.includes("shortness of breath")) {
-    results.push({ condition: "Possible Cardiac Event", severity: "high", specialist: "Cardiologist / Emergency", description: "Chest pain combined with breathing difficulty requires immediate medical attention." });
-  }
-  if (lower.includes("fever") && lower.includes("headache")) {
-    results.push({ condition: "Viral Fever", severity: "medium", specialist: "General Physician", description: "Fever with headache is commonly associated with viral infections. Rest and hydration are recommended." });
-  }
-  if (lower.includes("cough") && lower.includes("sore throat")) {
-    results.push({ condition: "Upper Respiratory Infection", severity: "low", specialist: "ENT Specialist", description: "Common cold symptoms that typically resolve within 7-10 days." });
-  }
-  if (results.length === 0) {
-    results.push({ condition: "General Health Concern", severity: "low", specialist: "General Physician", description: "Based on the symptoms provided, a general consultation is recommended for proper evaluation." });
-  }
-  return results;
-};
-
 const severityColors = {
   low: "bg-success/10 text-success border-success/20",
   medium: "bg-warning/10 text-warning border-warning/20",
@@ -40,6 +24,7 @@ const severityColors = {
 };
 
 export default function SymptomCheckerPage() {
+  const { user } = useAuth();
   const [symptoms, setSymptoms] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [results, setResults] = useState<AnalysisResult[] | null>(null);
@@ -59,23 +44,48 @@ export default function SymptomCheckerPage() {
     setResults(null);
   };
 
-  const analyze = () => {
+  const analyze = async () => {
     if (symptoms.length === 0) return;
     setAnalyzing(true);
-    setTimeout(() => {
-      setResults(mockAnalyze(symptoms));
+
+    try {
+      const { data, error } = await supabase.functions.invoke("analyze-symptoms", {
+        body: { symptoms },
+      });
+
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+
+      setResults(data.results || []);
+
+      // Save to history
+      if (user) {
+        await supabase.from("symptom_checks").insert({
+          user_id: user.id,
+          symptoms,
+          results: data.results || [],
+        });
+        await supabase.from("health_entries").insert({
+          user_id: user.id,
+          entry_type: "symptom",
+          title: `Symptom Check: ${symptoms.slice(0, 3).join(", ")}`,
+          detail: (data.results || []).map((r: AnalysisResult) => r.condition).join(", "),
+        });
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Analysis failed. Please try again.");
+    } finally {
       setAnalyzing(false);
-    }, 1500);
+    }
   };
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
         <h1 className="medical-heading text-2xl sm:text-3xl mb-2">Symptom Checker</h1>
         <p className="ai-insight-text">Describe your symptoms and our AI will suggest possible conditions and specialists.</p>
       </motion.div>
 
-      {/* Input */}
       <div className="clinical-card space-y-4">
         <div className="flex gap-2">
           <Input
@@ -134,7 +144,6 @@ export default function SymptomCheckerPage() {
         </Button>
       </div>
 
-      {/* Results */}
       <AnimatePresence>
         {results && (
           <motion.div
