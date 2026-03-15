@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import DashboardLayout from "./components/DashboardLayout";
 import HomePage from "./pages/HomePage";
 import PrescriptionPage from "./pages/PrescriptionPage";
@@ -14,32 +15,63 @@ import HealthHistoryPage from "./pages/HealthHistoryPage";
 import ConsultationPage from "./pages/ConsultationPage";
 import InsurancePage from "./pages/InsurancePage";
 import EmergencyPage from "./pages/EmergencyPage";
+import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
+
+function ProtectedRoutes() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="h-8 w-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) return <Navigate to="/auth" replace />;
+
+  return (
+    <DashboardLayout>
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/prescription" element={<PrescriptionPage />} />
+        <Route path="/report" element={<MedicalReportPage />} />
+        <Route path="/symptoms" element={<SymptomCheckerPage />} />
+        <Route path="/chat" element={<AIChatPage />} />
+        <Route path="/reminders" element={<RemindersPage />} />
+        <Route path="/history" element={<HealthHistoryPage />} />
+        <Route path="/consultation" element={<ConsultationPage />} />
+        <Route path="/insurance" element={<InsurancePage />} />
+        <Route path="/emergency" element={<EmergencyPage />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </DashboardLayout>
+  );
+}
+
+function AuthRoute() {
+  const { user, loading } = useAuth();
+  if (loading) return null;
+  if (user) return <Navigate to="/" replace />;
+  return <AuthPage />;
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <BrowserRouter>
-        <DashboardLayout>
+      <AuthProvider>
+        <BrowserRouter>
           <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/prescription" element={<PrescriptionPage />} />
-            <Route path="/report" element={<MedicalReportPage />} />
-            <Route path="/symptoms" element={<SymptomCheckerPage />} />
-            <Route path="/chat" element={<AIChatPage />} />
-            <Route path="/reminders" element={<RemindersPage />} />
-            <Route path="/history" element={<HealthHistoryPage />} />
-            <Route path="/consultation" element={<ConsultationPage />} />
-            <Route path="/insurance" element={<InsurancePage />} />
-            <Route path="/emergency" element={<EmergencyPage />} />
-            <Route path="*" element={<NotFound />} />
+            <Route path="/auth" element={<AuthRoute />} />
+            <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
-        </DashboardLayout>
-      </BrowserRouter>
+        </BrowserRouter>
+      </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
