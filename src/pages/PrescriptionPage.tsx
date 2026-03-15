@@ -117,17 +117,17 @@ export default function PrescriptionPage() {
               <h3 className="medical-heading text-base mb-2">Upload Prescription Image</h3>
               <p className="text-sm text-muted-foreground mb-4">Drag & drop or click to upload. Supports JPG, PNG, PDF.</p>
               <div className="flex justify-center gap-3">
-                <label>
+                <label className="cursor-pointer">
                   <input type="file" accept="image/*,application/pdf" onChange={onFileSelect} className="hidden" />
-                  <Button variant="outline" className="gap-2" asChild>
-                    <span><Upload className="h-4 w-4" />Browse Files</span>
-                  </Button>
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors">
+                    <Upload className="h-4 w-4" />Browse Files
+                  </span>
                 </label>
-                <label>
+                <label className="cursor-pointer">
                   <input type="file" accept="image/*" capture="environment" onChange={onFileSelect} className="hidden" />
-                  <Button variant="outline" className="gap-2" asChild>
-                    <span><Camera className="h-4 w-4" />Take Photo</span>
-                  </Button>
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors">
+                    <Camera className="h-4 w-4" />Take Photo
+                  </span>
                 </label>
               </div>
             </>

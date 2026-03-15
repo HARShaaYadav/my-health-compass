@@ -103,11 +103,11 @@ export default function MedicalReportPage() {
               <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
               <h3 className="medical-heading text-base mb-2">Upload Medical Report</h3>
               <p className="text-sm text-muted-foreground mb-4">PDF, JPG, or PNG — we'll extract and interpret your results.</p>
-              <label>
+              <label className="cursor-pointer">
                 <input type="file" accept="image/*,application/pdf" onChange={onFileSelect} className="hidden" />
-                <Button variant="outline" className="gap-2" asChild>
-                  <span><Upload className="h-4 w-4" />Browse Files</span>
-                </Button>
+                <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors">
+                  <Upload className="h-4 w-4" />Browse Files
+                </span>
               </label>
             </>
           )}
