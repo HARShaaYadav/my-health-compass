@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 export default function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [mode, setMode] = useState<"login" | "signup" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -20,7 +20,14 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      if (isLogin) {
+      if (mode === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+        if (error) throw error;
+        toast.success("Password reset email sent! Check your inbox.");
+        setMode("login");
+      } else if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         toast.success("Welcome back!");
@@ -46,11 +53,7 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md"
-      >
+      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-4">
             <Activity className="h-8 w-8 text-primary" />
@@ -60,76 +63,68 @@ export default function AuthPage() {
         </div>
 
         <div className="clinical-card">
-          <div className="flex mb-6 bg-secondary rounded-xl p-1">
-            <button
-              onClick={() => setIsLogin(true)}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
-                isLogin ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              Sign In
-            </button>
-            <button
-              onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
-                !isLogin ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"
-              }`}
-            >
-              Sign Up
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
-              <div className="relative">
-                <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Display name"
-                  value={displayName}
-                  onChange={e => setDisplayName(e.target.value)}
-                  className="pl-10"
-                />
+          {mode === "forgot" ? (
+            <>
+              <h2 className="medical-heading text-lg mb-1">Reset Password</h2>
+              <p className="text-sm text-muted-foreground mb-6">Enter your email and we'll send you a reset link.</p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required className="pl-10" />
+                </div>
+                <Button type="submit" className="w-full gap-2" disabled={loading}>
+                  {loading ? <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> : <>Send Reset Link<ArrowRight className="h-4 w-4" /></>}
+                </Button>
+                <button type="button" onClick={() => setMode("login")} className="w-full text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  Back to Sign In
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <div className="flex mb-6 bg-secondary rounded-xl p-1">
+                <button onClick={() => setMode("login")} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${mode === "login" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}>
+                  Sign In
+                </button>
+                <button onClick={() => setMode("signup")} className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${mode === "signup" ? "bg-card shadow-sm text-foreground" : "text-muted-foreground"}`}>
+                  Sign Up
+                </button>
               </div>
-            )}
-            <div className="relative">
-              <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="email"
-                placeholder="Email address"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                className="pl-10"
-              />
-            </div>
-            <div className="relative">
-              <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                minLength={6}
-                className="pl-10"
-              />
-            </div>
-            <Button type="submit" className="w-full gap-2" disabled={loading}>
-              {loading ? (
-                <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-              ) : (
-                <>
-                  {isLogin ? "Sign In" : "Create Account"}
-                  <ArrowRight className="h-4 w-4" />
-                </>
-              )}
-            </Button>
-          </form>
+
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {mode === "signup" && (
+                  <div className="relative">
+                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input placeholder="Display name" value={displayName} onChange={e => setDisplayName(e.target.value)} className="pl-10" />
+                  </div>
+                )}
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input type="email" placeholder="Email address" value={email} onChange={e => setEmail(e.target.value)} required className="pl-10" />
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} className="pl-10" />
+                </div>
+                {mode === "login" && (
+                  <button type="button" onClick={() => setMode("forgot")} className="text-sm text-primary hover:underline">
+                    Forgot password?
+                  </button>
+                )}
+                <Button type="submit" className="w-full gap-2" disabled={loading}>
+                  {loading ? (
+                    <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                  ) : (
+                    <>{mode === "login" ? "Sign In" : "Create Account"}<ArrowRight className="h-4 w-4" /></>
+                  )}
+                </Button>
+              </form>
+            </>
+          )}
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-6">
-          MedExplain AI provides information, not a diagnosis.
-          <br />Always consult your doctor.
+          MedExplain AI provides information, not a diagnosis.<br />Always consult your doctor.
         </p>
       </motion.div>
     </div>
