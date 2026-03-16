@@ -70,6 +70,45 @@ export type Database = {
           },
         ]
       }
+      consultations: {
+        Row: {
+          appointment_time: string
+          created_at: string
+          doctor_name: string
+          fee: string | null
+          id: string
+          notes: string | null
+          specialty: string
+          status: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          appointment_time: string
+          created_at?: string
+          doctor_name: string
+          fee?: string | null
+          id?: string
+          notes?: string | null
+          specialty: string
+          status?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          appointment_time?: string
+          created_at?: string
+          doctor_name?: string
+          fee?: string | null
+          id?: string
+          notes?: string | null
+          specialty?: string
+          status?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       health_entries: {
         Row: {
           created_at: string
