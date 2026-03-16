@@ -17,6 +17,7 @@ import InsurancePage from "./pages/InsurancePage";
 import EmergencyPage from "./pages/EmergencyPage";
 import AuthPage from "./pages/AuthPage";
 import NotFound from "./pages/NotFound";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 const queryClient = new QueryClient();
 
