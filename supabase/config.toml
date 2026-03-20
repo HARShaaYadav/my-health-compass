@@ -11,3 +11,12 @@ verify_jwt = false
 
 [functions.analyze-report]
 verify_jwt = false
+
+[functions.analyze-insurance]
+verify_jwt = false
+
+[functions.analyze-image]
+verify_jwt = false
+
+[functions.check-interactions]
+verify_jwt = false

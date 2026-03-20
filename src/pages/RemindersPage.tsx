@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { Bell, Plus, Clock, Check, Pill, Trash2, X } from "lucide-react";
+import { Bell, Plus, Clock, Check, Pill, Trash2, X, AlertTriangle, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
@@ -19,6 +19,20 @@ interface Reminder {
   is_active: boolean;
 }
 
+interface Interaction {
+  drug1: string;
+  drug2: string;
+  severity: "low" | "moderate" | "severe";
+  description: string;
+  recommendation: string;
+}
+
+const severityStyles = {
+  low: "border-l-warning bg-warning/5",
+  moderate: "border-l-warning bg-warning/5",
+  severe: "border-l-destructive bg-destructive/5",
+};
+
 export default function RemindersPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -27,6 +41,9 @@ export default function RemindersPage() {
   const [dosage, setDosage] = useState("");
   const [times, setTimes] = useState("08:00");
   const [endDate, setEndDate] = useState("");
+  const [interactions, setInteractions] = useState<Interaction[] | null>(null);
+  const [interactionSummary, setInteractionSummary] = useState("");
+  const [checkingInteractions, setCheckingInteractions] = useState(false);
 
   const { data: reminders = [], isLoading } = useQuery({
     queryKey: ["reminders", user?.id],
@@ -40,6 +57,8 @@ export default function RemindersPage() {
     },
     enabled: !!user,
   });
+
+  const activeReminders = reminders.filter(r => r.is_active);
 
   const addMutation = useMutation({
     mutationFn: async () => {
@@ -59,6 +78,7 @@ export default function RemindersPage() {
       setDosage("");
       setTimes("08:00");
       setEndDate("");
+      setInteractions(null);
       toast.success("Reminder added!");
     },
     onError: (e: any) => toast.error(e.message),
@@ -69,7 +89,10 @@ export default function RemindersPage() {
       const { error } = await supabase.from("medicine_reminders").update({ is_active }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["reminders"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      setInteractions(null);
+    },
   });
 
   const deleteMutation = useMutation({
@@ -79,9 +102,33 @@ export default function RemindersPage() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["reminders"] });
+      setInteractions(null);
       toast.success("Reminder deleted");
     },
   });
+
+  const checkInteractions = async () => {
+    if (activeReminders.length < 2) {
+      toast.info("Need at least 2 active medicines to check interactions.");
+      return;
+    }
+    setCheckingInteractions(true);
+    setInteractions(null);
+    try {
+      const medicines = activeReminders.map(r => `${r.medicine_name}${r.dosage ? ` (${r.dosage})` : ""}`);
+      const { data, error } = await supabase.functions.invoke("check-interactions", {
+        body: { medicines },
+      });
+      if (error) throw error;
+      if (data.error) throw new Error(data.error);
+      setInteractions(data.interactions || []);
+      setInteractionSummary(data.summary || "");
+    } catch (e: any) {
+      toast.error(e.message || "Interaction check failed");
+    } finally {
+      setCheckingInteractions(false);
+    }
+  };
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -111,6 +158,78 @@ export default function RemindersPage() {
           <Button onClick={() => addMutation.mutate()} disabled={!name.trim() || addMutation.isPending} className="w-full">
             {addMutation.isPending ? "Adding..." : "Add Reminder"}
           </Button>
+        </motion.div>
+      )}
+
+      {/* Interaction Check */}
+      {activeReminders.length >= 2 && (
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+          <Button variant="outline" className="w-full gap-2" onClick={checkInteractions} disabled={checkingInteractions}>
+            {checkingInteractions ? (
+              <>
+                <span className="h-4 w-4 border-2 border-foreground/30 border-t-foreground rounded-full animate-spin" />
+                Checking interactions...
+              </>
+            ) : (
+              <>
+                <Shield className="h-4 w-4" />
+                Check Drug Interactions ({activeReminders.length} medicines)
+              </>
+            )}
+          </Button>
+        </motion.div>
+      )}
+
+      {/* Interaction Results */}
+      {interactions !== null && (
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+          {interactions.length === 0 ? (
+            <div className="clinical-card-normal flex items-center gap-3">
+              <Check className="h-5 w-5 text-primary flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium">No known interactions found</p>
+                <p className="text-xs text-muted-foreground">{interactionSummary}</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h3 className="medical-heading text-sm flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                Potential Interactions Found
+              </h3>
+              {interactions.map((ix, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className={`clinical-card border-l-4 ${severityStyles[ix.severity]}`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium">{ix.drug1} + {ix.drug2}</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                      ix.severity === "severe" ? "bg-destructive/10 text-destructive" :
+                      ix.severity === "moderate" ? "bg-warning/10 text-warning" :
+                      "bg-muted text-muted-foreground"
+                    }`}>
+                      {ix.severity}
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground mb-2">{ix.description}</p>
+                  <p className="text-xs text-foreground font-medium">→ {ix.recommendation}</p>
+                </motion.div>
+              ))}
+              {interactionSummary && (
+                <p className="ai-insight-text text-sm">{interactionSummary}</p>
+              )}
+              <div className="clinical-card-warning flex items-start gap-3">
+                <AlertTriangle className="h-4 w-4 text-warning flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-muted-foreground">
+                  This is AI-generated guidance. Always consult your pharmacist or doctor about drug interactions.
+                </p>
+              </div>
+            </>
+          )}
         </motion.div>
       )}
 

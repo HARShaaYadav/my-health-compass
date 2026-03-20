@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { FileText, Upload, Camera, AlertCircle, Pill } from "lucide-react";
+import { FileText, Upload, Camera, AlertCircle, Pill, Bell, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,6 +24,7 @@ export default function PrescriptionPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState<PrescriptionResult | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [addedReminders, setAddedReminders] = useState<Set<number>>(new Set());
 
   const handleFile = useCallback(async (file: File) => {
     if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
@@ -34,6 +35,7 @@ export default function PrescriptionPage() {
     setPreview(URL.createObjectURL(file));
     setAnalyzing(true);
     setResult(null);
+    setAddedReminders(new Set());
 
     try {
       const reader = new FileReader();
@@ -55,7 +57,6 @@ export default function PrescriptionPage() {
 
       setResult(data);
 
-      // Save to DB
       if (user) {
         await supabase.from("prescriptions").insert({
           user_id: user.id,
@@ -76,6 +77,29 @@ export default function PrescriptionPage() {
       setAnalyzing(false);
     }
   }, [user]);
+
+  const addToReminders = async (med: Medicine, index: number) => {
+    if (!user) return;
+    try {
+      // Parse frequency to times
+      const freq = med.frequency.toLowerCase();
+      let times = ["08:00"];
+      if (freq.includes("twice") || freq.includes("2")) times = ["08:00", "20:00"];
+      else if (freq.includes("three") || freq.includes("3") || freq.includes("thrice")) times = ["08:00", "14:00", "20:00"];
+
+      const { error } = await supabase.from("medicine_reminders").insert({
+        user_id: user.id,
+        medicine_name: med.name,
+        dosage: med.dosage || null,
+        times,
+      });
+      if (error) throw error;
+      setAddedReminders(prev => new Set(prev).add(index));
+      toast.success(`Reminder set for ${med.name}`);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to add reminder");
+    }
+  };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -107,7 +131,7 @@ export default function PrescriptionPage() {
               <p className="text-sm text-muted-foreground">Reading prescription data...</p>
             </div>
           ) : preview && result ? (
-            <div className="flex items-center gap-2 text-primary">
+            <div className="flex items-center gap-2 text-primary justify-center">
               <FileText className="h-6 w-6" />
               <span className="font-medium">Prescription analyzed successfully</span>
             </div>
@@ -146,9 +170,24 @@ export default function PrescriptionPage() {
               transition={{ delay: i * 0.04 }}
               className="clinical-card-normal"
             >
-              <div className="flex items-center gap-2 mb-2">
-                <Pill className="h-5 w-5 text-primary" />
-                <h3 className="medical-heading text-base">{med.name}</h3>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Pill className="h-5 w-5 text-primary" />
+                  <h3 className="medical-heading text-base">{med.name}</h3>
+                </div>
+                <Button
+                  size="sm"
+                  variant={addedReminders.has(i) ? "ghost" : "outline"}
+                  className="gap-1.5 text-xs"
+                  disabled={addedReminders.has(i)}
+                  onClick={() => addToReminders(med, i)}
+                >
+                  {addedReminders.has(i) ? (
+                    <><Check className="h-3.5 w-3.5 text-primary" />Added</>
+                  ) : (
+                    <><Bell className="h-3.5 w-3.5" />Add Reminder</>
+                  )}
+                </Button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
                 <div className="p-2 rounded-lg bg-secondary">
