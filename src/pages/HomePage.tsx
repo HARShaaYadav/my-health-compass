@@ -1,8 +1,9 @@
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   FileText, ClipboardList, Stethoscope, MessageCircle,
   Bell, History, Video, Shield, AlertTriangle,
-  TrendingUp, Heart, Pill,
+  TrendingUp, Heart, Pill, Sparkles,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
@@ -23,11 +24,48 @@ const secondaryActions = [
   { path: "/insurance", label: "Insurance Help", icon: Shield },
 ];
 
+const healthTips = [
+  "Drink at least 8 glasses of water daily to stay hydrated and support kidney function.",
+  "Aim for 7–9 hours of sleep each night — poor sleep is linked to higher heart disease risk.",
+  "Take short walking breaks every 60 minutes if you sit for long periods during work.",
+  "Include leafy greens in at least one meal today — they're rich in iron and vitamins.",
+  "Practice deep breathing for 2 minutes when stressed — it lowers cortisol levels measurably.",
+  "Schedule your annual health checkup if it's been more than 12 months.",
+  "Limit processed sugar intake — excess sugar contributes to inflammation and metabolic issues.",
+];
+
 const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.04 } } };
 const fadeUp = { hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0, transition: { duration: 0.3 } } };
 
+function computeHealthScore(counts: { reminders: number; reports: number; entries: number; checks: number; consultations: number }) {
+  let score = 0;
+  if (counts.reminders > 0) score += 20;
+  if (counts.reports > 0) score += 20;
+  if (counts.entries > 0) score += 20;
+  if (counts.checks > 0) score += 20;
+  if (counts.consultations > 0) score += 20;
+  return score;
+}
+
+function getScoreLabel(score: number) {
+  if (score === 0) return "Get started";
+  if (score <= 20) return "Just beginning";
+  if (score <= 40) return "Building up";
+  if (score <= 60) return "On track";
+  if (score <= 80) return "Great progress";
+  return "Excellent";
+}
+
+function getScoreColor(score: number) {
+  if (score <= 20) return "text-muted-foreground";
+  if (score <= 40) return "text-warning";
+  if (score <= 60) return "text-accent";
+  return "text-primary";
+}
+
 export default function HomePage() {
   const { user } = useAuth();
+  const [dailyTip] = useState(() => healthTips[Math.floor(Math.random() * healthTips.length)]);
 
   const { data: reminderCount = 0 } = useQuery({
     queryKey: ["reminder-count", user?.id],
@@ -47,6 +85,41 @@ export default function HomePage() {
     enabled: !!user,
   });
 
+  const { data: entryCount = 0 } = useQuery({
+    queryKey: ["entry-count", user?.id],
+    queryFn: async () => {
+      const { count } = await supabase.from("health_entries").select("*", { count: "exact", head: true });
+      return count || 0;
+    },
+    enabled: !!user,
+  });
+
+  const { data: checkCount = 0 } = useQuery({
+    queryKey: ["check-count", user?.id],
+    queryFn: async () => {
+      const { count } = await supabase.from("symptom_checks").select("*", { count: "exact", head: true });
+      return count || 0;
+    },
+    enabled: !!user,
+  });
+
+  const { data: consultationCount = 0 } = useQuery({
+    queryKey: ["consultation-count", user?.id],
+    queryFn: async () => {
+      const { count } = await supabase.from("consultations").select("*", { count: "exact", head: true });
+      return count || 0;
+    },
+    enabled: !!user,
+  });
+
+  const healthScore = computeHealthScore({
+    reminders: reminderCount,
+    reports: reportCount,
+    entries: entryCount,
+    checks: checkCount,
+    consultations: consultationCount,
+  });
+
   return (
     <div className="space-y-10">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="page-section-hero text-center lg:text-left">
@@ -54,6 +127,18 @@ export default function HomePage() {
         <p className="ai-insight-text text-lg max-w-2xl">
           Upload prescriptions, understand lab reports, check symptoms, and get AI-powered health guidance — all in one place.
         </p>
+      </motion.div>
+
+      {/* Daily Health Insight */}
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+        className="clinical-card-info flex items-start gap-4">
+        <div className="p-2 rounded-xl bg-accent/10 flex-shrink-0">
+          <Sparkles className="h-5 w-5 text-accent" />
+        </div>
+        <div>
+          <h3 className="text-xs font-medium uppercase tracking-wide text-accent mb-1">Daily Health Tip</h3>
+          <p className="ai-insight-text text-sm">{dailyTip}</p>
+        </div>
       </motion.div>
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -81,8 +166,16 @@ export default function HomePage() {
             <Heart className="h-5 w-5 text-primary" />
             <span className="text-sm font-medium text-muted-foreground">Health Score</span>
           </div>
-          <p className="text-3xl font-semibold tabular-nums text-foreground">--</p>
-          <p className="text-xs text-muted-foreground mt-1">Complete a checkup to get your score</p>
+          <p className={`text-3xl font-semibold tabular-nums ${getScoreColor(healthScore)}`}>{healthScore}</p>
+          <p className="text-xs text-muted-foreground mt-1">{getScoreLabel(healthScore)}</p>
+          <div className="mt-3 h-1.5 bg-muted rounded-full overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${healthScore}%` }}
+              transition={{ duration: 0.8, delay: 0.3 }}
+              className="h-full bg-primary rounded-full"
+            />
+          </div>
         </motion.div>
         <motion.div variants={fadeUp} className="clinical-card-info">
           <div className="flex items-center gap-3 mb-3">
