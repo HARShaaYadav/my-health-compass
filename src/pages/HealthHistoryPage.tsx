@@ -1,9 +1,13 @@
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { History, FileText, Stethoscope, Pill, Calendar, MessageCircle, StickyNote, Trash2 } from "lucide-react";
+import { History, FileText, Stethoscope, Pill, Calendar, MessageCircle, StickyNote, Trash2, Plus, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 const iconMap: Record<string, any> = {
   report: FileText,
@@ -13,9 +17,22 @@ const iconMap: Record<string, any> = {
   note: StickyNote,
 };
 
+const entryTypes = [
+  { value: "visit", label: "Doctor Visit" },
+  { value: "note", label: "Health Note" },
+  { value: "prescription", label: "Prescription" },
+  { value: "symptom", label: "Symptom" },
+  { value: "report", label: "Lab Report" },
+];
+
 export default function HealthHistoryPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [showForm, setShowForm] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newDetail, setNewDetail] = useState("");
+  const [newType, setNewType] = useState("note");
+  const [newDate, setNewDate] = useState(new Date().toISOString().split("T")[0]);
 
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ["health-entries", user?.id],
@@ -31,6 +48,29 @@ export default function HealthHistoryPage() {
     enabled: !!user,
   });
 
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from("health_entries").insert({
+        user_id: user!.id,
+        entry_type: newType,
+        title: newTitle,
+        detail: newDetail || null,
+        entry_date: newDate,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["health-entries"] });
+      setShowForm(false);
+      setNewTitle("");
+      setNewDetail("");
+      setNewType("note");
+      setNewDate(new Date().toISOString().split("T")[0]);
+      toast.success("Entry added!");
+    },
+    onError: (e: any) => toast.error(e.message),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.from("health_entries").delete().eq("id", id);
@@ -42,7 +82,6 @@ export default function HealthHistoryPage() {
     },
   });
 
-  // Group by month
   const grouped = entries.reduce<Record<string, typeof entries>>((acc, entry) => {
     const date = new Date(entry.entry_date);
     const key = `${date.toLocaleString("default", { month: "long" })} ${date.getFullYear()}`;
@@ -53,10 +92,42 @@ export default function HealthHistoryPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="medical-heading text-2xl sm:text-3xl mb-2">Health History</h1>
-        <p className="ai-insight-text">Your personal health timeline — prescriptions, reports, and checkups in one place.</p>
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="flex items-start justify-between">
+        <div>
+          <h1 className="medical-heading text-2xl sm:text-3xl mb-2">Health History</h1>
+          <p className="ai-insight-text">Your personal health timeline — prescriptions, reports, and checkups in one place.</p>
+        </div>
+        <Button className="gap-2" onClick={() => setShowForm(!showForm)}>
+          {showForm ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+          {showForm ? "Cancel" : "Add Entry"}
+        </Button>
       </motion.div>
+
+      {showForm && (
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="clinical-card space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {entryTypes.map(t => (
+              <button
+                key={t.value}
+                onClick={() => setNewType(t.value)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  newType === t.value
+                    ? "bg-primary/10 border-primary/30 text-primary font-medium"
+                    : "border-border text-muted-foreground hover:border-primary/30"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <Input placeholder="Title *" value={newTitle} onChange={e => setNewTitle(e.target.value)} />
+          <Textarea placeholder="Details (optional)" value={newDetail} onChange={e => setNewDetail(e.target.value)} rows={3} />
+          <Input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} />
+          <Button onClick={() => addMutation.mutate()} disabled={!newTitle.trim() || addMutation.isPending} className="w-full">
+            {addMutation.isPending ? "Adding..." : "Add Entry"}
+          </Button>
+        </motion.div>
+      )}
 
       {isLoading ? (
         <div className="text-center py-12">
