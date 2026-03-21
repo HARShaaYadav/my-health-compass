@@ -11,10 +11,11 @@ export interface AlarmReminder {
 }
 
 const FIRED_KEY = "alarm_fired";
-// Cache reminders in memory to avoid polling too often
+
+// Module-level cache — persists across re-renders but resets on full page reload
 let cachedReminders: AlarmReminder[] = [];
 let lastFetch = 0;
-const FETCH_INTERVAL = 5 * 60 * 1000; // re-fetch every 5 minutes
+const FETCH_INTERVAL = 5 * 60 * 1000; // re-fetch from API every 5 min
 
 function getFired(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(FIRED_KEY) || "{}"); } catch { return {}; }
@@ -39,10 +40,9 @@ export function useReminderAlarm(onAlarm: (reminder: AlarmReminder, time: string
   const onAlarmRef = useRef(onAlarm);
   onAlarmRef.current = onAlarm;
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (forceFetch = false) => {
     try {
-      // Only re-fetch from API every 5 minutes
-      if (Date.now() - lastFetch > FETCH_INTERVAL) {
+      if (forceFetch || Date.now() - lastFetch > FETCH_INTERVAL) {
         cachedReminders = await api.get<AlarmReminder[]>("/reminders");
         lastFetch = Date.now();
       }
@@ -75,13 +75,15 @@ export function useReminderAlarm(onAlarm: (reminder: AlarmReminder, time: string
     if ("Notification" in window && Notification.permission === "default") {
       Notification.requestPermission();
     }
-    // Check every 30 seconds but only hits API every 5 minutes
-    check();
-    const interval = setInterval(check, 30_000);
+
+    // Force a fresh fetch on mount so alarms work immediately after login
+    check(true);
+
+    // Then check every 30s using cached data (API only called every 5 min)
+    const interval = setInterval(() => check(false), 30_000);
     return () => clearInterval(interval);
   }, [check]);
 
-  // Expose a way to bust the cache when reminders change
   return {
     invalidate: () => { lastFetch = 0; cachedReminders = []; },
   };
