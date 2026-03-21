@@ -1,257 +1,333 @@
-import { useState, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Stethoscope, Plus, X, AlertCircle, ChevronRight, Camera, Upload, ImageIcon } from "lucide-react";
+import { Send, Bot, User, Image, X, Stethoscope } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { supabase } from "@/integrations/supabase/client";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/contexts/AuthContext";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 
-const commonSymptoms = ["Fever", "Headache", "Cough", "Fatigue", "Nausea", "Body Pain", "Sore Throat", "Dizziness", "Chest Pain", "Shortness of Breath"];
-
-interface AnalysisResult {
-  condition: string;
-  severity: "low" | "medium" | "high";
-  specialist: string;
-  description: string;
+interface Message {
+  role: "user" | "assistant";
+  content: string;
+  imagePreview?: string;
+  imageBase64?: string;
+  mimeType?: string;
 }
 
-interface ImageAnalysis {
-  results: AnalysisResult[];
-  observations: string;
-  immediate_actions?: string[];
-  urgency: string;
-}
+const WELCOME: Message = {
+  role: "assistant",
+  content: `Hello! I'm your AI symptom checker. 👋
 
-const severityColors = {
-  low: "bg-success/10 text-success border-success/20",
-  medium: "bg-warning/10 text-warning border-warning/20",
-  high: "bg-destructive/10 text-destructive border-destructive/20",
+You can:
+- **Describe your symptoms** in plain language (e.g. "I have a headache and fever since yesterday")
+- **Upload a photo** of a skin condition, rash, or visible symptom
+- **Ask follow-up questions** — I'll guide you through the conversation
+
+*Remember: I provide information only, not a medical diagnosis. Always consult a doctor for proper evaluation.*
+
+What's bothering you today?`,
 };
+
+async function streamSymptomChat(
+  messages: Message[],
+  onDelta: (t: string) => void,
+  onDone: () => void
+) {
+  const payload = messages.map((m) => {
+    const base: any = { role: m.role, content: m.content };
+    if (m.imageBase64) { base.imageBase64 = m.imageBase64; base.mimeType = m.mimeType; }
+    return base;
+  });
+
+  const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  const token = localStorage.getItem("token");
+  const resp = await fetch(`${BASE_URL}/ai/symptom-chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ messages: payload }),
+  });
+
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => ({}));
+    throw new Error(data.error || `Request failed (${resp.status})`);
+  }
+  if (!resp.body) throw new Error("No response body");
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let done = false;
+
+  while (!done) {
+    const { done: d, value } = await reader.read();
+    if (d) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buffer.indexOf("\n")) !== -1) {
+      let line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      if (!line.trim() || line.startsWith(":")) continue;
+      if (!line.startsWith("data: ")) continue;
+      const json = line.slice(6).trim();
+      if (json === "[DONE]") { done = true; break; }
+      try {
+        const parsed = JSON.parse(json);
+        const content = parsed.choices?.[0]?.delta?.content;
+        if (content) onDelta(content);
+      } catch { buffer = line + "\n" + buffer; break; }
+    }
+  }
+  onDone();
+}
+
+function renderMarkdown(text: string) {
+  return text.split("\n").map((line, i) => {
+    const parts = line.split(/(\*\*.*?\*\*|\*.*?\*)/g).map((part, k) => {
+      if (part.startsWith("**") && part.endsWith("**"))
+        return <strong key={k}>{part.slice(2, -2)}</strong>;
+      if (part.startsWith("*") && part.endsWith("*"))
+        return <em key={k}>{part.slice(1, -1)}</em>;
+      return part;
+    });
+    const isListItem = line.trimStart().startsWith("- ") || line.trimStart().startsWith("• ");
+    return (
+      <p key={i} className={`${i > 0 ? "mt-1.5" : ""} ${isListItem ? "pl-3" : ""}`}>
+        {parts}
+      </p>
+    );
+  });
+}
 
 export default function SymptomCheckerPage() {
   const { user } = useAuth();
-  const [symptoms, setSymptoms] = useState<string[]>([]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [input, setInput] = useState("");
-  const [results, setResults] = useState<AnalysisResult[] | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [imageAnalysis, setImageAnalysis] = useState<ImageAnalysis | null>(null);
-  const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<{
+    preview: string; base64: string; mimeType: string; file: File;
+  } | null>(null);
+  const endRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const addSymptom = (symptom: string) => {
-    const trimmed = symptom.trim();
-    if (trimmed && !symptoms.includes(trimmed)) {
-      setSymptoms([...symptoms, trimmed]);
-      setResults(null);
-    }
-    setInput("");
-  };
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isStreaming]);
 
-  const removeSymptom = (symptom: string) => {
-    setSymptoms(symptoms.filter(s => s !== symptom));
-    setResults(null);
-  };
-
-  const analyze = async () => {
-    if (symptoms.length === 0) return;
-    setAnalyzing(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("analyze-symptoms", { body: { symptoms } });
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-      setResults(data.results || []);
-      if (user) {
-        await supabase.from("symptom_checks").insert({ user_id: user.id, symptoms, results: data.results || [] });
-        await supabase.from("health_entries").insert({
-          user_id: user.id, entry_type: "symptom",
-          title: `Symptom Check: ${symptoms.slice(0, 3).join(", ")}`,
-          detail: (data.results || []).map((r: AnalysisResult) => r.condition).join(", "),
-        });
-      }
-    } catch (e: any) {
-      toast.error(e.message || "Analysis failed. Please try again.");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  const handleImageUpload = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please upload an image file.");
-      return;
-    }
-    setImagePreview(URL.createObjectURL(file));
-    setAnalyzingImage(true);
-    setImageAnalysis(null);
-
-    try {
-      const reader = new FileReader();
-      const base64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve((reader.result as string).split(",")[1]);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
-
-      const { data, error } = await supabase.functions.invoke("analyze-image", {
-        body: { imageBase64: base64, mimeType: file.type },
-      });
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-      setImageAnalysis(data);
-
-      if (user) {
-        await supabase.from("health_entries").insert({
-          user_id: user.id, entry_type: "symptom",
-          title: `Image Analysis: ${(data.results || []).map((r: AnalysisResult) => r.condition).join(", ") || "Visual Check"}`,
-          detail: data.observations?.slice(0, 200),
-        });
-      }
-      toast.success("Image analyzed!");
-    } catch (e: any) {
-      toast.error(e.message || "Image analysis failed");
-    } finally {
-      setAnalyzingImage(false);
-    }
-  }, [user]);
-
-  const onImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) handleImageUpload(file);
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please select an image file."); return; }
+    if (file.size > 10 * 1024 * 1024) { toast.error("Image must be under 10MB."); return; }
+    const preview = URL.createObjectURL(file);
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    setAttachedImage({ preview, base64, mimeType: file.type, file });
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  const removeImage = () => {
+    if (attachedImage) URL.revokeObjectURL(attachedImage.preview);
+    setAttachedImage(null);
   };
 
-  const allResults = [
-    ...(results || []),
-    ...(imageAnalysis?.results || []),
-  ];
+  const send = async () => {
+    const hasText = input.trim().length > 0;
+    const hasImage = !!attachedImage;
+    if ((!hasText && !hasImage) || isStreaming) return;
+
+    const userMsg: Message = {
+      role: "user",
+      content: hasText ? input.trim() : "Please analyze this image.",
+      ...(hasImage && {
+        imagePreview: attachedImage!.preview,
+        imageBase64: attachedImage!.base64,
+        mimeType: attachedImage!.mimeType,
+      }),
+    };
+
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setAttachedImage(null);
+    setIsStreaming(true);
+
+    // Save to health entries
+    if (user && hasText) {
+      api.post("/health-entries", {
+        entryType: "symptom",
+        title: `Symptom Chat: ${input.trim().slice(0, 60)}`,
+        detail: input.trim().slice(0, 200),
+      }).catch(() => {});
+    }
+
+    let assistantContent = "";
+    const upsert = (chunk: string) => {
+      assistantContent += chunk;
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant" && prev.length === newMessages.length + 1) {
+          return prev.map((m, i) => i === prev.length - 1 ? { ...m, content: assistantContent } : m);
+        }
+        return [...prev, { role: "assistant", content: assistantContent }];
+      });
+    };
+
+    try {
+      await streamSymptomChat(newMessages, upsert, () => setIsStreaming(false));
+    } catch (e: any) {
+      toast.error(e.message || "Analysis failed");
+      setIsStreaming(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
-      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
-        <h1 className="medical-heading text-2xl sm:text-3xl mb-2">Symptom Checker</h1>
-        <p className="ai-insight-text">Describe your symptoms or upload an image for AI-powered analysis.</p>
-      </motion.div>
-
-      {/* Text-based symptoms */}
-      <div className="clinical-card space-y-4">
-        <h3 className="text-sm font-medium flex items-center gap-2"><Stethoscope className="h-4 w-4 text-primary" />Describe Symptoms</h3>
-        <div className="flex gap-2">
-          <Input placeholder="Type a symptom..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addSymptom(input)} className="flex-1" />
-          <Button onClick={() => addSymptom(input)} size="icon" variant="outline"><Plus className="h-4 w-4" /></Button>
+    <div className="flex flex-col h-[calc(100vh-8rem)] sm:h-[calc(100vh-6rem)] max-w-3xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center gap-3 py-4 px-1 border-b border-border flex-shrink-0">
+        <div className="p-2 rounded-xl bg-primary/10">
+          <Stethoscope className="h-5 w-5 text-primary" />
         </div>
-        <div className="flex flex-wrap gap-2">
-          {commonSymptoms.map(s => (
-            <button key={s} onClick={() => addSymptom(s)}
-              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${symptoms.includes(s) ? "bg-primary/10 border-primary/30 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:text-primary"}`}>
-              {s}
-            </button>
+        <div>
+          <h1 className="medical-heading text-lg">Symptom Checker</h1>
+          <p className="text-xs text-muted-foreground">Describe symptoms or upload an image — I'll help you understand what's going on.</p>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto py-6 space-y-6 px-1">
+        <AnimatePresence initial={false}>
+          {messages.map((msg, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+              className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              {msg.role === "assistant" && (
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mt-1">
+                  <Bot className="h-4 w-4 text-primary" />
+                </div>
+              )}
+
+              <div className={`max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col gap-1`}>
+                {/* Image bubble */}
+                {msg.imagePreview && (
+                  <div className={`rounded-2xl overflow-hidden border border-border ${msg.role === "user" ? "rounded-tr-sm" : "rounded-tl-sm"}`}>
+                    <img src={msg.imagePreview} alt="Uploaded" className="max-h-52 w-auto object-contain" />
+                  </div>
+                )}
+                {/* Text bubble */}
+                {msg.content && (
+                  <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground rounded-tr-sm"
+                      : "bg-card border border-border rounded-tl-sm"
+                  }`}>
+                    {renderMarkdown(msg.content)}
+                  </div>
+                )}
+              </div>
+
+              {msg.role === "user" && (
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-secondary flex items-center justify-center mt-1">
+                  <User className="h-4 w-4 text-foreground" />
+                </div>
+              )}
+            </motion.div>
           ))}
-        </div>
-        {symptoms.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-            {symptoms.map(s => (
-              <Badge key={s} variant="secondary" className="gap-1 pr-1">
-                {s}
-                <button onClick={() => removeSymptom(s)} className="ml-1 hover:text-destructive"><X className="h-3 w-3" /></button>
-              </Badge>
-            ))}
-          </div>
-        )}
-        <Button onClick={analyze} disabled={symptoms.length === 0 || analyzing} className="w-full">
-          {analyzing ? (
-            <span className="flex items-center gap-2">
-              <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-              Analyzing symptoms...
-            </span>
-          ) : (
-            <span className="flex items-center gap-2"><Stethoscope className="h-4 w-4" />Analyze Symptoms</span>
-          )}
-        </Button>
-      </div>
+        </AnimatePresence>
 
-      {/* Image-based detection */}
-      <div className="clinical-card space-y-4">
-        <h3 className="text-sm font-medium flex items-center gap-2"><ImageIcon className="h-4 w-4 text-accent" />Visual Symptom Analysis</h3>
-        <p className="text-xs text-muted-foreground">Upload a photo of skin conditions, rashes, eye infections, or swelling for AI analysis.</p>
-
-        {analyzingImage ? (
-          <div className="text-center py-6">
-            <div className="h-8 w-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Analyzing image...</p>
-          </div>
-        ) : imagePreview && imageAnalysis ? (
-          <div className="flex items-center gap-3">
-            <img src={imagePreview} alt="Uploaded" className="h-16 w-16 rounded-xl object-cover border border-border" />
-            <div>
-              <p className="text-sm font-medium text-primary">Image analyzed</p>
-              <p className="text-xs text-muted-foreground">{imageAnalysis.observations?.slice(0, 80)}...</p>
+        {/* Typing indicator */}
+        {isStreaming && messages[messages.length - 1]?.role !== "assistant" && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex gap-3 justify-start">
+            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <Bot className="h-4 w-4 text-primary" />
             </div>
-          </div>
-        ) : (
-          <div className="flex gap-3">
-            <label className="cursor-pointer flex-1">
-              <input type="file" accept="image/*" onChange={onImageSelect} className="hidden" />
-              <span className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors">
-                <Upload className="h-4 w-4" />Upload Image
-              </span>
-            </label>
-            <label className="cursor-pointer flex-1">
-              <input type="file" accept="image/*" capture="environment" onChange={onImageSelect} className="hidden" />
-              <span className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed border-border text-sm text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors">
-                <Camera className="h-4 w-4" />Take Photo
-              </span>
-            </label>
-          </div>
-        )}
-      </div>
-
-      {/* Image immediate actions */}
-      {imageAnalysis?.immediate_actions && imageAnalysis.immediate_actions.length > 0 && (
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="clinical-card-info">
-          <h3 className="medical-heading text-sm mb-2">Suggested Immediate Actions</h3>
-          <ul className="space-y-1.5">
-            {imageAnalysis.immediate_actions.map((action, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <ChevronRight className="h-3.5 w-3.5 text-accent flex-shrink-0 mt-0.5" />{action}
-              </li>
-            ))}
-          </ul>
-        </motion.div>
-      )}
-
-      {/* Results */}
-      <AnimatePresence>
-        {allResults.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
-            <h2 className="medical-heading text-lg">Analysis Results</h2>
-            {allResults.map((r, i) => (
-              <motion.div key={`${r.condition}-${i}`} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-                className={`clinical-card border-l-4 ${r.severity === "high" ? "border-l-destructive" : r.severity === "medium" ? "border-l-warning" : "border-l-primary"}`}>
-                <div className="flex items-start justify-between mb-3">
-                  <h3 className="medical-heading text-base">{r.condition}</h3>
-                  <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${severityColors[r.severity]}`}>
-                    {r.severity.charAt(0).toUpperCase() + r.severity.slice(1)} Severity
-                  </span>
-                </div>
-                <p className="ai-insight-text text-sm mb-3">{r.description}</p>
-                <div className="flex items-center gap-2 text-sm">
-                  <ChevronRight className="h-4 w-4 text-primary" />
-                  <span className="text-muted-foreground">Recommended:</span>
-                  <span className="font-medium text-foreground">{r.specialist}</span>
-                </div>
-              </motion.div>
-            ))}
-            <div className="clinical-card-warning flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">Disclaimer: </span>
-                This is an AI-based suggestion and is not a medical diagnosis. Please consult a licensed doctor for proper evaluation.
-              </p>
+            <div className="bg-card border border-border rounded-2xl rounded-tl-sm px-4 py-3">
+              <div className="flex gap-1.5 items-center h-4">
+                {[0, 150, 300].map((delay) => (
+                  <span key={delay} className="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: `${delay}ms` }} />
+                ))}
+              </div>
             </div>
           </motion.div>
         )}
-      </AnimatePresence>
+
+        <div ref={endRef} />
+      </div>
+
+      {/* Image preview strip */}
+      {attachedImage && (
+        <div className="px-1 pb-2 flex-shrink-0">
+          <div className="relative inline-block">
+            <img src={attachedImage.preview} alt="Attached" className="h-16 w-16 rounded-xl object-cover border border-border" />
+            <button
+              onClick={removeImage}
+              className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 shadow-sm hover:scale-110 transition-transform"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Input bar */}
+      <div className="flex-shrink-0 pb-4">
+        <div className="flex items-end gap-2 bg-card border border-border rounded-2xl px-3 py-2 shadow-sm focus-within:border-primary/50 transition-colors">
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelect} className="hidden" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0 h-8 w-8 text-muted-foreground hover:text-primary mb-0.5"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isStreaming}
+            title="Upload image"
+          >
+            <Image className="h-4 w-4" />
+          </Button>
+
+          <Textarea
+            ref={textareaRef}
+            placeholder="Describe your symptoms or ask a health question..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            className="flex-1 border-0 shadow-none focus-visible:ring-0 resize-none min-h-[36px] max-h-32 py-1.5 text-sm bg-transparent"
+            style={{ height: "auto" }}
+            onInput={(e) => {
+              const t = e.currentTarget;
+              t.style.height = "auto";
+              t.style.height = Math.min(t.scrollHeight, 128) + "px";
+            }}
+          />
+
+          <Button
+            onClick={send}
+            size="icon"
+            className="shrink-0 h-8 w-8 mb-0.5"
+            disabled={(!input.trim() && !attachedImage) || isStreaming}
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+        <p className="text-center text-xs text-muted-foreground mt-2">Press Enter to send · Shift+Enter for new line</p>
+      </div>
     </div>
   );
 }

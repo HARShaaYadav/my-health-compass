@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { FileText, Upload, Camera, AlertCircle, Pill, Bell, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
@@ -31,7 +31,6 @@ export default function PrescriptionPage() {
       toast.error("Please upload an image or PDF file.");
       return;
     }
-
     setPreview(URL.createObjectURL(file));
     setAnalyzing(true);
     setResult(null);
@@ -40,32 +39,18 @@ export default function PrescriptionPage() {
     try {
       const reader = new FileReader();
       const base64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(",")[1]);
-        };
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
 
-      const { data, error } = await supabase.functions.invoke("analyze-prescription", {
-        body: { imageBase64: base64, mimeType: file.type },
-      });
-
-      if (error) throw error;
-      if (data.error) throw new Error(data.error);
-
+      const data = await api.post<PrescriptionResult>("/ai/analyze-prescription", { imageBase64: base64, mimeType: file.type });
       setResult(data);
 
       if (user) {
-        await supabase.from("prescriptions").insert({
-          user_id: user.id,
-          extracted_text: data.extracted_text,
-          medicines: data.medicines,
-        });
-        await supabase.from("health_entries").insert({
-          user_id: user.id,
-          entry_type: "prescription",
+        await api.post("/prescriptions", { extractedText: data.extracted_text, medicines: data.medicines });
+        await api.post("/health-entries", {
+          entryType: "prescription",
           title: `Prescription: ${(data.medicines || []).map((m: Medicine) => m.name).join(", ") || "Scanned"}`,
           detail: data.extracted_text?.slice(0, 200),
         });
@@ -81,36 +66,21 @@ export default function PrescriptionPage() {
   const addToReminders = async (med: Medicine, index: number) => {
     if (!user) return;
     try {
-      // Parse frequency to times
       const freq = med.frequency.toLowerCase();
       let times = ["08:00"];
       if (freq.includes("twice") || freq.includes("2")) times = ["08:00", "20:00"];
       else if (freq.includes("three") || freq.includes("3") || freq.includes("thrice")) times = ["08:00", "14:00", "20:00"];
 
-      const { error } = await supabase.from("medicine_reminders").insert({
-        user_id: user.id,
-        medicine_name: med.name,
-        dosage: med.dosage || null,
-        times,
-      });
-      if (error) throw error;
-      setAddedReminders(prev => new Set(prev).add(index));
+      await api.post("/reminders", { medicineName: med.name, dosage: med.dosage || null, times });
+      setAddedReminders((prev) => new Set(prev).add(index));
       toast.success(`Reminder set for ${med.name}`);
     } catch (e: any) {
       toast.error(e.message || "Failed to add reminder");
     }
   };
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  };
-
-  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-  };
+  const onDrop = (e: React.DragEvent) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handleFile(file); };
+  const onFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => { const file = e.target.files?.[0]; if (file) handleFile(file); };
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -120,21 +90,14 @@ export default function PrescriptionPage() {
       </motion.div>
 
       <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="clinical-card">
-        <div
-          onDragOver={e => e.preventDefault()}
-          onDrop={onDrop}
-          className="border-2 border-dashed border-border rounded-2xl p-12 text-center hover:border-primary/40 transition-colors cursor-pointer"
-        >
+        <div onDragOver={(e) => e.preventDefault()} onDrop={onDrop} className="border-2 border-dashed border-border rounded-2xl p-6 sm:p-12 text-center hover:border-primary/40 transition-colors cursor-pointer">
           {analyzing ? (
             <div className="space-y-4">
               <div className="h-10 w-10 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto" />
               <p className="text-sm text-muted-foreground">Reading prescription data...</p>
             </div>
           ) : preview && result ? (
-            <div className="flex items-center gap-2 text-primary justify-center">
-              <FileText className="h-6 w-6" />
-              <span className="font-medium">Prescription analyzed successfully</span>
-            </div>
+            <div className="flex items-center gap-2 text-primary justify-center"><FileText className="h-6 w-6" /><span className="font-medium">Prescription analyzed successfully</span></div>
           ) : (
             <>
               <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
@@ -143,15 +106,11 @@ export default function PrescriptionPage() {
               <div className="flex justify-center gap-3">
                 <label className="cursor-pointer">
                   <input type="file" accept="image/*,application/pdf" onChange={onFileSelect} className="hidden" />
-                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors">
-                    <Upload className="h-4 w-4" />Browse Files
-                  </span>
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors"><Upload className="h-4 w-4" />Browse Files</span>
                 </label>
                 <label className="cursor-pointer">
                   <input type="file" accept="image/*" capture="environment" onChange={onFileSelect} className="hidden" />
-                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors">
-                    <Camera className="h-4 w-4" />Take Photo
-                  </span>
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-sm font-medium hover:bg-secondary transition-colors"><Camera className="h-4 w-4" />Take Photo</span>
                 </label>
               </div>
             </>
@@ -163,68 +122,30 @@ export default function PrescriptionPage() {
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
           <h2 className="medical-heading text-lg">Extracted Medicines</h2>
           {result.medicines.map((med, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.04 }}
-              className="clinical-card-normal"
-            >
+            <motion.div key={i} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="clinical-card-normal">
               <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Pill className="h-5 w-5 text-primary" />
-                  <h3 className="medical-heading text-base">{med.name}</h3>
-                </div>
-                <Button
-                  size="sm"
-                  variant={addedReminders.has(i) ? "ghost" : "outline"}
-                  className="gap-1.5 text-xs"
-                  disabled={addedReminders.has(i)}
-                  onClick={() => addToReminders(med, i)}
-                >
-                  {addedReminders.has(i) ? (
-                    <><Check className="h-3.5 w-3.5 text-primary" />Added</>
-                  ) : (
-                    <><Bell className="h-3.5 w-3.5" />Add Reminder</>
-                  )}
+                <div className="flex items-center gap-2"><Pill className="h-5 w-5 text-primary" /><h3 className="medical-heading text-base">{med.name}</h3></div>
+                <Button size="sm" variant={addedReminders.has(i) ? "ghost" : "outline"} className="gap-1.5 text-xs" disabled={addedReminders.has(i)} onClick={() => addToReminders(med, i)}>
+                  {addedReminders.has(i) ? <><Check className="h-3.5 w-3.5 text-primary" />Added</> : <><Bell className="h-3.5 w-3.5" />Add Reminder</>}
                 </Button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
-                <div className="p-2 rounded-lg bg-secondary">
-                  <span className="text-muted-foreground">Dosage: </span>
-                  <span className="font-medium">{med.dosage}</span>
-                </div>
-                <div className="p-2 rounded-lg bg-secondary">
-                  <span className="text-muted-foreground">Frequency: </span>
-                  <span className="font-medium">{med.frequency}</span>
-                </div>
-                {med.duration && (
-                  <div className="p-2 rounded-lg bg-secondary">
-                    <span className="text-muted-foreground">Duration: </span>
-                    <span className="font-medium">{med.duration}</span>
-                  </div>
-                )}
+                <div className="p-2 rounded-lg bg-secondary"><span className="text-muted-foreground">Dosage: </span><span className="font-medium">{med.dosage}</span></div>
+                <div className="p-2 rounded-lg bg-secondary"><span className="text-muted-foreground">Frequency: </span><span className="font-medium">{med.frequency}</span></div>
+                {med.duration && <div className="p-2 rounded-lg bg-secondary"><span className="text-muted-foreground">Duration: </span><span className="font-medium">{med.duration}</span></div>}
               </div>
-              {med.purpose && (
-                <p className="ai-insight-text text-sm mt-2">{med.purpose}</p>
-              )}
+              {med.purpose && <p className="ai-insight-text text-sm mt-2">{med.purpose}</p>}
             </motion.div>
           ))}
-
           {result.extracted_text && (
-            <div className="clinical-card">
-              <h3 className="medical-heading text-sm mb-2">Raw Extracted Text</h3>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">{result.extracted_text}</p>
-            </div>
+            <div className="clinical-card"><h3 className="medical-heading text-sm mb-2">Raw Extracted Text</h3><p className="text-sm text-muted-foreground whitespace-pre-wrap">{result.extracted_text}</p></div>
           )}
         </motion.div>
       )}
 
       <div className="clinical-card-warning flex items-start gap-3">
         <AlertCircle className="h-5 w-5 text-warning flex-shrink-0 mt-0.5" />
-        <p className="text-sm text-muted-foreground">
-          AI-based handwriting recognition may not be 100% accurate. Always verify with your pharmacist.
-        </p>
+        <p className="text-sm text-muted-foreground">AI-based handwriting recognition may not be 100% accurate. Always verify with your pharmacist.</p>
       </div>
     </div>
   );

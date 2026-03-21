@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   FileText, ClipboardList, Stethoscope, MessageCircle,
@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 
 const quickActions = [
@@ -67,74 +67,29 @@ export default function HomePage() {
   const { user } = useAuth();
   const [dailyTip] = useState(() => healthTips[Math.floor(Math.random() * healthTips.length)]);
 
-  const { data: reminderCount = 0 } = useQuery({
-    queryKey: ["reminder-count", user?.id],
-    queryFn: async () => {
-      const { count } = await supabase.from("medicine_reminders").select("*", { count: "exact", head: true }).eq("is_active", true);
-      return count || 0;
-    },
-    enabled: !!user,
-  });
+  const { data: reminderData } = useQuery({ queryKey: ["reminder-count", user?.id], queryFn: () => api.get<{ count: number }>("/reminders/count"), enabled: !!user });
+  const { data: reportData } = useQuery({ queryKey: ["report-count", user?.id], queryFn: () => api.get<{ count: number }>("/reports/count"), enabled: !!user });
+  const { data: entryData } = useQuery({ queryKey: ["entry-count", user?.id], queryFn: () => api.get<{ count: number }>("/health-entries/count"), enabled: !!user });
+  const { data: checkData } = useQuery({ queryKey: ["check-count", user?.id], queryFn: () => api.get<{ count: number }>("/symptom-checks/count"), enabled: !!user });
+  const { data: consultData } = useQuery({ queryKey: ["consultation-count", user?.id], queryFn: () => api.get<{ count: number }>("/consultations/count"), enabled: !!user });
 
-  const { data: reportCount = 0 } = useQuery({
-    queryKey: ["report-count", user?.id],
-    queryFn: async () => {
-      const { count } = await supabase.from("medical_reports").select("*", { count: "exact", head: true });
-      return count || 0;
-    },
-    enabled: !!user,
-  });
+  const reminderCount = reminderData?.count ?? 0;
+  const reportCount = reportData?.count ?? 0;
+  const entryCount = entryData?.count ?? 0;
+  const checkCount = checkData?.count ?? 0;
+  const consultationCount = consultData?.count ?? 0;
 
-  const { data: entryCount = 0 } = useQuery({
-    queryKey: ["entry-count", user?.id],
-    queryFn: async () => {
-      const { count } = await supabase.from("health_entries").select("*", { count: "exact", head: true });
-      return count || 0;
-    },
-    enabled: !!user,
-  });
-
-  const { data: checkCount = 0 } = useQuery({
-    queryKey: ["check-count", user?.id],
-    queryFn: async () => {
-      const { count } = await supabase.from("symptom_checks").select("*", { count: "exact", head: true });
-      return count || 0;
-    },
-    enabled: !!user,
-  });
-
-  const { data: consultationCount = 0 } = useQuery({
-    queryKey: ["consultation-count", user?.id],
-    queryFn: async () => {
-      const { count } = await supabase.from("consultations").select("*", { count: "exact", head: true });
-      return count || 0;
-    },
-    enabled: !!user,
-  });
-
-  const healthScore = computeHealthScore({
-    reminders: reminderCount,
-    reports: reportCount,
-    entries: entryCount,
-    checks: checkCount,
-    consultations: consultationCount,
-  });
+  const healthScore = computeHealthScore({ reminders: reminderCount, reports: reportCount, entries: entryCount, checks: checkCount, consultations: consultationCount });
 
   return (
     <div className="space-y-10">
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="page-section-hero text-center lg:text-left">
         <h1 className="medical-heading text-3xl sm:text-4xl lg:text-5xl mb-4">Your health, decoded.</h1>
-        <p className="ai-insight-text text-lg max-w-2xl">
-          Upload prescriptions, understand lab reports, check symptoms, and get AI-powered health guidance — all in one place.
-        </p>
+        <p className="ai-insight-text text-lg max-w-2xl">Upload prescriptions, understand lab reports, check symptoms, and get AI-powered health guidance — all in one place.</p>
       </motion.div>
 
-      {/* Daily Health Insight */}
-      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-        className="clinical-card-info flex items-start gap-4">
-        <div className="p-2 rounded-xl bg-accent/10 flex-shrink-0">
-          <Sparkles className="h-5 w-5 text-accent" />
-        </div>
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="clinical-card-info flex items-start gap-4">
+        <div className="p-2 rounded-xl bg-accent/10 flex-shrink-0"><Sparkles className="h-5 w-5 text-accent" /></div>
         <div>
           <h3 className="text-xs font-medium uppercase tracking-wide text-accent mb-1">Daily Health Tip</h3>
           <p className="ai-insight-text text-sm">{dailyTip}</p>
@@ -162,34 +117,20 @@ export default function HomePage() {
 
       <motion.div variants={stagger} initial="hidden" animate="show" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <motion.div variants={fadeUp} className="clinical-card-normal">
-          <div className="flex items-center gap-3 mb-3">
-            <Heart className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium text-muted-foreground">Health Score</span>
-          </div>
+          <div className="flex items-center gap-3 mb-3"><Heart className="h-5 w-5 text-primary" /><span className="text-sm font-medium text-muted-foreground">Health Score</span></div>
           <p className={`text-3xl font-semibold tabular-nums ${getScoreColor(healthScore)}`}>{healthScore}</p>
           <p className="text-xs text-muted-foreground mt-1">{getScoreLabel(healthScore)}</p>
           <div className="mt-3 h-1.5 bg-muted rounded-full overflow-hidden">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${healthScore}%` }}
-              transition={{ duration: 0.8, delay: 0.3 }}
-              className="h-full bg-primary rounded-full"
-            />
+            <motion.div initial={{ width: 0 }} animate={{ width: `${healthScore}%` }} transition={{ duration: 0.8, delay: 0.3 }} className="h-full bg-primary rounded-full" />
           </div>
         </motion.div>
         <motion.div variants={fadeUp} className="clinical-card-info">
-          <div className="flex items-center gap-3 mb-3">
-            <Pill className="h-5 w-5 text-accent" />
-            <span className="text-sm font-medium text-muted-foreground">Active Medicines</span>
-          </div>
+          <div className="flex items-center gap-3 mb-3"><Pill className="h-5 w-5 text-accent" /><span className="text-sm font-medium text-muted-foreground">Active Medicines</span></div>
           <p className="text-3xl font-semibold tabular-nums text-foreground">{reminderCount}</p>
           <p className="text-xs text-muted-foreground mt-1">{reminderCount === 0 ? "Add medicines from prescriptions" : "Active reminders set"}</p>
         </motion.div>
         <motion.div variants={fadeUp} className="clinical-card-normal">
-          <div className="flex items-center gap-3 mb-3">
-            <TrendingUp className="h-5 w-5 text-primary" />
-            <span className="text-sm font-medium text-muted-foreground">Reports Analyzed</span>
-          </div>
+          <div className="flex items-center gap-3 mb-3"><TrendingUp className="h-5 w-5 text-primary" /><span className="text-sm font-medium text-muted-foreground">Reports Analyzed</span></div>
           <p className="text-3xl font-semibold tabular-nums text-foreground">{reportCount}</p>
           <p className="text-xs text-muted-foreground mt-1">{reportCount === 0 ? "Upload your first medical report" : "Reports processed"}</p>
         </motion.div>
@@ -213,8 +154,7 @@ export default function HomePage() {
       </div>
 
       <Link to="/emergency" className="block">
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}
-          className="clinical-card-danger flex items-center gap-4 cursor-pointer hover:-translate-y-0.5">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="clinical-card-danger flex items-center gap-4 cursor-pointer hover:-translate-y-0.5">
           <AlertTriangle className="h-6 w-6 text-destructive flex-shrink-0" />
           <div>
             <h3 className="medical-heading text-base text-destructive">Emergency Help</h3>

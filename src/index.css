@@ -138,7 +138,7 @@
   }
 
   .safety-banner {
-    @apply bg-foreground text-background p-3 text-xs uppercase tracking-widest text-center;
+    @apply bg-foreground text-background py-2.5 px-4 text-xs uppercase tracking-widest text-center w-full;
   }
 
   .page-section {

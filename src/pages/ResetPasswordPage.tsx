@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Activity, Lock, ArrowRight, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { supabase } from "@/integrations/supabase/client";
+import { api } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -14,30 +14,13 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Check for recovery token in URL hash
-    const hash = window.location.hash;
-    if (!hash.includes("type=recovery")) {
-      toast.error("Invalid reset link. Please request a new one.");
-      navigate("/auth");
-    }
-  }, [navigate]);
-
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (password !== confirmPassword) {
-      toast.error("Passwords do not match");
-      return;
-    }
-    if (password.length < 6) {
-      toast.error("Password must be at least 6 characters");
-      return;
-    }
-
+    if (password !== confirmPassword) { toast.error("Passwords do not match"); return; }
+    if (password.length < 6) { toast.error("Password must be at least 6 characters"); return; }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
+      await api.put("/auth/password", { password });
       setSuccess(true);
       toast.success("Password updated successfully!");
       setTimeout(() => navigate("/"), 2000);
@@ -58,7 +41,6 @@ export default function ResetPasswordPage() {
           </div>
           <p className="ai-insight-text">Set your new password</p>
         </div>
-
         <div className="clinical-card">
           {success ? (
             <div className="text-center py-6">
@@ -70,11 +52,11 @@ export default function ResetPasswordPage() {
             <form onSubmit={handleReset} className="space-y-4">
               <div className="relative">
                 <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input type="password" placeholder="New password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} className="pl-10" />
+                <Input type="password" placeholder="New password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} className="pl-10" />
               </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input type="password" placeholder="Confirm new password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={6} className="pl-10" />
+                <Input type="password" placeholder="Confirm new password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} required minLength={6} className="pl-10" />
               </div>
               <Button type="submit" className="w-full gap-2" disabled={loading}>
                 {loading ? <span className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" /> : <>Update Password<ArrowRight className="h-4 w-4" /></>}

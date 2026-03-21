@@ -87,8 +87,10 @@ export default function AppSidebar() {
           {user && (
             <div className="flex items-center gap-2">
               <Link to="/profile" onClick={() => setMobileOpen(false)}
-                className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary hover:bg-primary/20 transition-colors">
-                {user.email?.[0]?.toUpperCase() || "U"}
+                className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-medium text-primary hover:bg-primary/20 transition-colors overflow-hidden">
+                {localStorage.getItem(`avatar_${user.id}`)
+                  ? <img src={localStorage.getItem(`avatar_${user.id}`)!} alt="avatar" className="h-full w-full object-cover" />
+                  : user.email?.[0]?.toUpperCase() || "U"}
               </Link>
               <div className="flex-1 min-w-0">
                 <Link to="/profile" onClick={() => setMobileOpen(false)} className="text-xs font-medium truncate block hover:text-primary transition-colors">
