@@ -1,7 +1,43 @@
-import { ReactNode } from "react";
+import { ReactNode, useState, useCallback } from "react";
 import AppSidebar from "./AppSidebar";
+import AlarmModal from "./AlarmModal";
+import { useReminderAlarm, AlarmReminder } from "@/hooks/useReminderAlarm";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
+
+interface ActiveAlarm { reminder: AlarmReminder; time: string }
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const [alarm, setAlarm] = useState<ActiveAlarm | null>(null);
+  const [snoozeTimeout, setSnoozeTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleAlarm = useCallback((reminder: AlarmReminder, time: string) => {
+    setAlarm({ reminder, time });
+  }, []);
+
+  // Only run alarm checks when logged in
+  useReminderAlarm(user ? handleAlarm : () => {});
+
+  const handleTaken = () => {
+    if (alarm) toast.success(`✅ ${alarm.reminder.medicineName} marked as taken`);
+    setAlarm(null);
+  };
+
+  const handleSnooze = () => {
+    if (!alarm) return;
+    const snoozed = alarm;
+    setAlarm(null);
+    toast.info(`⏰ Snoozed for 5 minutes`);
+    const t = setTimeout(() => setAlarm(snoozed), 5 * 60 * 1000);
+    setSnoozeTimeout(t);
+  };
+
+  const handleDismiss = () => {
+    if (snoozeTimeout) clearTimeout(snoozeTimeout);
+    setAlarm(null);
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <AppSidebar />
@@ -13,6 +49,13 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           MedExplain AI provides information, not a diagnosis. Your doctor remains your primary source of medical truth.
         </footer>
       </main>
+
+      <AlarmModal
+        alarm={alarm}
+        onTaken={handleTaken}
+        onSnooze={handleSnooze}
+        onDismiss={handleDismiss}
+      />
     </div>
   );
 }

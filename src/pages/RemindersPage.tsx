@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Bell, Plus, Clock, Check, Pill, Trash2, X, AlertTriangle, Shield } from "lucide-react";
+import { Bell, Plus, Clock, Check, Pill, Trash2, X, AlertTriangle, Shield, AlarmClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -173,22 +173,53 @@ export default function RemindersPage() {
       ) : reminders.length === 0 ? (
         <div className="clinical-card text-center py-8"><Bell className="h-8 w-8 text-muted-foreground mx-auto mb-3" /><p className="text-sm text-muted-foreground">No reminders yet. Add your first medicine reminder above.</p></div>
       ) : (
-        <div className="space-y-3">
-          {reminders.map((r, i) => (
-            <motion.div key={r._id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className={`clinical-card flex items-center gap-4 ${!r.isActive ? "opacity-60" : ""}`}>
-              <button onClick={() => toggleMutation.mutate({ id: r._id, isActive: !r.isActive })} className={`p-3 rounded-xl transition-colors ${r.isActive ? "bg-primary/10" : "bg-success/10"}`}>
-                {r.isActive ? <Pill className="h-5 w-5 text-primary" /> : <Check className="h-5 w-5 text-success" />}
-              </button>
-              <div className="flex-1">
-                <h3 className="medical-heading text-base">{r.medicineName}</h3>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
-                  <Clock className="h-3.5 w-3.5" />{r.times.join(", ")}{r.dosage && <span>· {r.dosage}</span>}
+        <>
+          {/* Next upcoming reminder */}
+          {(() => {
+            const now = new Date();
+            const nowMins = now.getHours() * 60 + now.getMinutes();
+            let next: { name: string; dosage: string | null; time: string; minsAway: number } | null = null;
+            for (const r of activeReminders) {
+              for (const t of r.times) {
+                const [h, m] = t.split(":").map(Number);
+                const tMins = h * 60 + m;
+                const diff = tMins > nowMins ? tMins - nowMins : tMins + 1440 - nowMins;
+                if (!next || diff < next.minsAway) next = { name: r.medicineName, dosage: r.dosage, time: t, minsAway: diff };
+              }
+            }
+            if (!next) return null;
+            const hrs = Math.floor(next.minsAway / 60);
+            const mins = next.minsAway % 60;
+            const label = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+            return (
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="clinical-card-info flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-primary/10"><AlarmClock className="h-5 w-5 text-primary" /></div>
+                <div className="flex-1">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Next Reminder</p>
+                  <p className="text-sm font-medium">{next.name}{next.dosage ? ` · ${next.dosage}` : ""} at {next.time}</p>
                 </div>
-              </div>
-              <button onClick={() => deleteMutation.mutate(r._id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
-            </motion.div>
-          ))}
-        </div>
+                <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-full">in {label}</span>
+              </motion.div>
+            );
+          })()}
+
+          <div className="space-y-3">
+            {reminders.map((r, i) => (
+              <motion.div key={r._id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className={`clinical-card flex items-center gap-4 ${!r.isActive ? "opacity-60" : ""}`}>
+                <button onClick={() => toggleMutation.mutate({ id: r._id, isActive: !r.isActive })} className={`p-3 rounded-xl transition-colors ${r.isActive ? "bg-primary/10" : "bg-success/10"}`}>
+                  {r.isActive ? <Pill className="h-5 w-5 text-primary" /> : <Check className="h-5 w-5 text-success" />}
+                </button>
+                <div className="flex-1">
+                  <h3 className="medical-heading text-base">{r.medicineName}</h3>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
+                    <Clock className="h-3.5 w-3.5" />{r.times.join(", ")}{r.dosage && <span>· {r.dosage}</span>}
+                  </div>
+                </div>
+                <button onClick={() => deleteMutation.mutate(r._id)} className="p-2 text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
+              </motion.div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
