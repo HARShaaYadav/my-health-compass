@@ -1,73 +1,83 @@
-# Welcome to your Lovable project
+# MedExplain AI
 
-## Project info
+AI-powered health companion — symptom checker, prescription scanner, medical report translator, and more.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Stack
 
-## How can I edit this code?
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui
+- **Backend**: Node.js + Express + MongoDB Atlas + Mongoose
+- **AI**: Google Gemini 2.0 Flash
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## Local Development
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+### Prerequisites
+- Node.js 18+
+- MongoDB Atlas account
+- Google Gemini API key
 
-Changes made via Lovable will be committed automatically to this repo.
+### 1. Clone & install
 
-**Use your preferred IDE**
+```bash
+# Frontend
+npm install
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+# Backend
+cd backend && npm install
 ```
 
-**Edit a file directly in GitHub**
+### 2. Configure environment
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```bash
+# Root .env (frontend)
+VITE_API_URL=http://localhost:5000/api
 
-**Use GitHub Codespaces**
+# backend/.env
+NODE_ENV=development
+PORT=5000
+MONGODB_URI=mongodb+srv://...
+JWT_SECRET=your_secret_here
+JWT_EXPIRES_IN=7d
+GEMINI_API_KEY=your_gemini_key
+FRONTEND_URL=http://localhost:8080
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### 3. Run both servers
 
-## What technologies are used for this project?
+```bash
+npm run dev:all
+```
 
-This project is built with:
+- Frontend: http://localhost:8080
+- Backend: http://localhost:5000
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+---
 
-## How can I deploy this project?
+## Production Deployment
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+### Backend (Railway / Render / Fly.io)
 
-## Can I connect a custom domain to my Lovable project?
+1. Deploy the `backend/` folder
+2. Set all env vars from `backend/.env.example`
+3. Set `NODE_ENV=production`
+4. Start command: `node src/index.js`
 
-Yes, you can!
+### Frontend (Vercel / Netlify)
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+1. Build command: `npm run build`
+2. Output directory: `dist`
+3. Set env var: `VITE_API_URL=https://your-backend-url.com/api`
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `MONGODB_URI` | ✅ | MongoDB Atlas connection string |
+| `JWT_SECRET` | ✅ | Min 32 chars random string |
+| `GEMINI_API_KEY` | ✅ | Google AI Studio API key |
+| `FRONTEND_URL` | ✅ | Deployed frontend URL (for CORS) |
+| `NODE_ENV` | ✅ | `production` or `development` |
+| `PORT` | — | Defaults to 5000 |
