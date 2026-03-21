@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Send, Bot, User, Plus, MessageCircle, Trash2 } from "lucide-react";
+import { Send, Bot, User, Plus, MessageCircle, Trash2, Image, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
@@ -8,18 +8,31 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-interface Message {
+interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  imageBase64?: string;
+  mimeType?: string;
+  imagePreview?: string; // local object URL for display
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-async function streamChat({ messages, onDelta, onDone }: { messages: Message[]; onDelta: (text: string) => void; onDone: () => void }) {
+async function streamChat({ messages, onDelta, onDone }: { messages: ChatMessage[]; onDelta: (text: string) => void; onDone: () => void }) {
+  // Build payload — include imageBase64 for messages that have it
+  const payload = messages.map(m => {
+    const base: any = { role: m.role, content: m.content };
+    if (m.imageBase64) {
+      base.imageBase64 = m.imageBase64;
+      base.mimeType = m.mimeType || "image/jpeg";
+    }
+    return base;
+  });
+
   const resp = await fetch(CHAT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}` },
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({ messages: payload }),
   });
 
   if (!resp.ok) {
@@ -60,13 +73,15 @@ export default function AIChatPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([
+  const [messages, setMessages] = useState<ChatMessage[]>([
     { role: "assistant", content: "Hello! I'm your AI health assistant. Ask me any health-related question, and I'll explain it in simple terms.\n\n*Remember: I provide information, not diagnoses. Always consult your doctor for medical decisions.*" },
   ]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string; base64: string; mimeType: string } | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: conversations = [] } = useQuery({
     queryKey: ["chat-conversations", user?.id],
@@ -82,6 +97,38 @@ export default function AIChatPage() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isStreaming]);
 
+  const handleImageSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Image must be under 10MB.");
+      return;
+    }
+
+    const preview = URL.createObjectURL(file);
+    const base64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    setAttachedImage({ file, preview, base64, mimeType: file.type });
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  const removeImage = () => {
+    if (attachedImage) {
+      URL.revokeObjectURL(attachedImage.preview);
+      setAttachedImage(null);
+    }
+  };
+
   const loadConversation = async (id: string) => {
     const { data, error } = await supabase.from("chat_messages").select("*").eq("conversation_id", id).order("created_at", { ascending: true });
     if (error) { toast.error("Failed to load conversation"); return; }
@@ -96,6 +143,7 @@ export default function AIChatPage() {
       { role: "assistant", content: "Hello! I'm your AI health assistant. Ask me any health-related question, and I'll explain it in simple terms.\n\n*Remember: I provide information, not diagnoses. Always consult your doctor for medical decisions.*" },
     ]);
     setShowHistory(false);
+    removeImage();
   };
 
   const deleteConversation = async (id: string) => {
@@ -106,17 +154,30 @@ export default function AIChatPage() {
   };
 
   const send = async () => {
-    if (!input.trim() || isStreaming || !user) return;
-    const userMsg: Message = { role: "user", content: input.trim() };
+    const hasText = input.trim().length > 0;
+    const hasImage = !!attachedImage;
+    if ((!hasText && !hasImage) || isStreaming || !user) return;
+
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: hasText ? input.trim() : (hasImage ? "Please analyze this image." : ""),
+      ...(hasImage && {
+        imageBase64: attachedImage!.base64,
+        mimeType: attachedImage!.mimeType,
+        imagePreview: attachedImage!.preview,
+      }),
+    };
+
     const newMessages = [...messages, userMsg];
     setMessages(newMessages);
     setInput("");
+    setAttachedImage(null);
     setIsStreaming(true);
 
     // Create or get conversation
     let convId = conversationId;
     if (!convId) {
-      const title = input.trim().slice(0, 50);
+      const title = (hasText ? input.trim() : "Image analysis").slice(0, 50);
       const { data, error } = await supabase.from("chat_conversations").insert({ user_id: user.id, title }).select("id").single();
       if (error) { toast.error("Failed to create conversation"); setIsStreaming(false); return; }
       convId = data.id;
@@ -124,7 +185,7 @@ export default function AIChatPage() {
       queryClient.invalidateQueries({ queryKey: ["chat-conversations"] });
     }
 
-    // Save user message
+    // Save user message (text only — images are transient)
     await supabase.from("chat_messages").insert({ conversation_id: convId, role: "user", content: userMsg.content });
 
     let assistantContent = "";
@@ -142,7 +203,6 @@ export default function AIChatPage() {
     try {
       await streamChat({ messages: newMessages, onDelta: upsert, onDone: async () => {
         setIsStreaming(false);
-        // Save assistant message
         if (convId && assistantContent) {
           await supabase.from("chat_messages").insert({ conversation_id: convId, role: "assistant", content: assistantContent });
         }
@@ -194,6 +254,9 @@ export default function AIChatPage() {
               <div className="p-2 rounded-xl bg-primary/10 h-fit"><Bot className="h-4 w-4 text-primary" /></div>
             )}
             <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${msg.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border border-border"}`}>
+              {msg.imagePreview && (
+                <img src={msg.imagePreview} alt="Attached" className="rounded-lg mb-2 max-h-48 w-auto object-contain" />
+              )}
               {msg.content.split("\n").map((line, j) => (
                 <p key={j} className={j > 0 ? "mt-2" : ""}>
                   {line.split(/(\*\*.*?\*\*|\*.*?\*)/g).map((part, k) => {
@@ -224,9 +287,49 @@ export default function AIChatPage() {
         <div ref={endRef} />
       </div>
 
-      <div className="clinical-card flex gap-2 !p-3">
-        <Input placeholder="Ask a health question..." value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} className="flex-1 border-0 shadow-none focus-visible:ring-0" />
-        <Button onClick={send} size="icon" disabled={!input.trim() || isStreaming}><Send className="h-4 w-4" /></Button>
+      {/* Image preview strip */}
+      {attachedImage && (
+        <div className="mb-2 flex items-center gap-2 px-1">
+          <div className="relative inline-block">
+            <img src={attachedImage.preview} alt="Attached" className="h-16 w-16 rounded-lg object-cover border border-border" />
+            <button
+              onClick={removeImage}
+              className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 shadow-sm hover:scale-110 transition-transform"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          <span className="text-xs text-muted-foreground truncate max-w-[200px]">{attachedImage.file.name}</span>
+        </div>
+      )}
+
+      <div className="clinical-card flex items-center gap-2 !p-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleImageSelect}
+          className="hidden"
+        />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0 text-muted-foreground hover:text-primary"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isStreaming}
+        >
+          <Image className="h-5 w-5" />
+        </Button>
+        <Input
+          placeholder={attachedImage ? "Add a message or send image..." : "Ask a health question..."}
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && send()}
+          className="flex-1 border-0 shadow-none focus-visible:ring-0"
+        />
+        <Button onClick={send} size="icon" disabled={(!input.trim() && !attachedImage) || isStreaming}>
+          <Send className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );

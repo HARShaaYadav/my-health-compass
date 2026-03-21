@@ -13,6 +13,25 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
+    // Transform messages to support multi-modal content (text + images)
+    const transformedMessages = messages.map((msg: any) => {
+      // If message has imageBase64, build multi-modal content array
+      if (msg.imageBase64) {
+        const parts: any[] = [];
+        if (msg.content) {
+          parts.push({ type: "text", text: msg.content });
+        }
+        parts.push({
+          type: "image_url",
+          image_url: {
+            url: `data:${msg.mimeType || "image/jpeg"};base64,${msg.imageBase64}`,
+          },
+        });
+        return { role: msg.role, content: parts };
+      }
+      return { role: msg.role, content: msg.content };
+    });
+
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -20,7 +39,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
         messages: [
           {
             role: "system",
@@ -33,9 +52,12 @@ IMPORTANT RULES:
 - ALWAYS remind users to consult their doctor for medical decisions
 - Use markdown formatting for clarity (bold, lists, etc.)
 - Be empathetic and reassuring but factually accurate
-- If symptoms sound urgent (chest pain, difficulty breathing, stroke symptoms), advise seeking immediate emergency care`
+- If symptoms sound urgent (chest pain, difficulty breathing, stroke symptoms), advise seeking immediate emergency care
+- When images are shared, analyze them carefully and provide helpful medical information
+- For skin conditions, rashes, or visible symptoms in images, describe what you observe and suggest possible conditions and specialists
+- Always clarify that image-based analysis is not a substitute for in-person examination`
           },
-          ...messages,
+          ...transformedMessages,
         ],
         stream: true,
       }),
