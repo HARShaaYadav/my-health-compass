@@ -31,7 +31,6 @@ function wasFiredRecently(key: string): boolean {
 }
 
 export function useReminderAlarm(onAlarm: (reminder: AlarmReminder, time: string) => void) {
-  // Keep onAlarm in a ref so the interval always calls the latest version
   const onAlarmRef = useRef(onAlarm);
   onAlarmRef.current = onAlarm;
 
@@ -42,11 +41,14 @@ export function useReminderAlarm(onAlarm: (reminder: AlarmReminder, time: string
 
     const runCheck = async (forceFetch = false) => {
       try {
-        if (forceFetch || Date.now() - lastFetch > FETCH_INTERVAL) {
-          cachedReminders = await api.get<AlarmReminder[]>("/reminders");
+        // Always re-fetch if cache is stale or forced
+        if (forceFetch || cachedReminders.length === 0 || Date.now() - lastFetch > FETCH_INTERVAL) {
+          const fresh = await api.get<AlarmReminder[]>("/reminders");
+          cachedReminders = fresh;
           lastFetch = Date.now();
         }
 
+        // Get current HH:MM fresh every tick
         const now = new Date();
         const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
         const today = now.toISOString().split("T")[0];
@@ -59,6 +61,7 @@ export function useReminderAlarm(onAlarm: (reminder: AlarmReminder, time: string
             if (t === hhmm && !wasFiredRecently(key)) {
               markFired(key);
               onAlarmRef.current(r, t);
+              // Browser notification when tab is hidden
               if (document.hidden && "Notification" in window && Notification.permission === "granted") {
                 new Notification("💊 Medicine Reminder", {
                   body: `Time to take ${r.medicineName}${r.dosage ? ` (${r.dosage})` : ""} at ${t}`,
@@ -68,15 +71,16 @@ export function useReminderAlarm(onAlarm: (reminder: AlarmReminder, time: string
             }
           }
         }
-      } catch { /* not logged in */ }
+      } catch { /* not logged in or network error */ }
     };
 
-    // Fresh fetch immediately on mount
+    // Immediate fetch on mount
     runCheck(true);
-    // Then every 30s — uses cache, only hits API every 5 min
-    const interval = setInterval(() => runCheck(false), 30_000);
+
+    // Check every 10 seconds — time comparison is cheap, API only called every 5 min
+    const interval = setInterval(() => runCheck(false), 10_000);
     return () => clearInterval(interval);
-  }, []); // empty deps — interval is set once, onAlarm always fresh via ref
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     invalidate: () => { lastFetch = 0; cachedReminders = []; },

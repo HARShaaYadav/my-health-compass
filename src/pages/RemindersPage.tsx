@@ -44,10 +44,10 @@ export default function RemindersPage() {
   const [interactions, setInteractions] = useState<Interaction[] | null>(null);
   const [interactionSummary, setInteractionSummary] = useState("");
   const [checkingInteractions, setCheckingInteractions] = useState(false);
-  // Live clock — updates every 30s so countdown stays fresh
+  // Live clock — updates every 10s so countdown stays accurate
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 30_000);
+    const t = setInterval(() => setNow(new Date()), 10_000);
     return () => clearInterval(t);
   }, []);
 
