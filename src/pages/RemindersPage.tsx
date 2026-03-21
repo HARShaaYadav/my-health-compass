@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Bell, Plus, Clock, Check, Pill, Trash2, X, AlertTriangle, Shield, AlarmClock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,12 @@ export default function RemindersPage() {
   const [interactions, setInteractions] = useState<Interaction[] | null>(null);
   const [interactionSummary, setInteractionSummary] = useState("");
   const [checkingInteractions, setCheckingInteractions] = useState(false);
+  // Live clock — updates every 30s so countdown stays fresh
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const { data: reminders = [], isLoading } = useQuery({
     queryKey: ["reminders", user?.id],
@@ -176,7 +182,6 @@ export default function RemindersPage() {
         <>
           {/* Next upcoming reminder */}
           {(() => {
-            const now = new Date();
             const nowMins = now.getHours() * 60 + now.getMinutes();
             let next: { name: string; dosage: string | null; time: string; minsAway: number } | null = null;
             for (const r of activeReminders) {
