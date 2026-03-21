@@ -45,19 +45,19 @@ app.use(cors({
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
-// Global rate limiter — 200 req / 15 min per IP
+// Global rate limiter — 500 req / 15 min per IP
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 500,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later." },
 }));
 
-// Stricter limiter for auth endpoints
+// Stricter limiter for auth endpoints only
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 50,
+  max: 30,
   message: { error: "Too many auth attempts, please try again later." },
 });
 

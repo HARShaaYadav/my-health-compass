@@ -16,8 +16,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
     setAlarm({ reminder, time });
   }, []);
 
-  // Only run alarm checks when logged in
-  useReminderAlarm(user ? handleAlarm : () => {});
+  const { invalidate } = useReminderAlarm(user ? handleAlarm : () => {});
 
   const handleTaken = () => {
     if (alarm) toast.success(`✅ ${alarm.reminder.medicineName} marked as taken`);
