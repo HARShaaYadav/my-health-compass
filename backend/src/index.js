@@ -28,8 +28,14 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    // allow non-browser requests (curl, Postman) and listed origins
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // allow non-browser requests (curl, Postman)
+    if (!origin) return cb(null, true);
+    // allow exact matches
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    // allow any vercel.app subdomain (preview deployments)
+    if (origin.endsWith(".vercel.app")) return cb(null, true);
+    // allow any render.com subdomain
+    if (origin.endsWith(".onrender.com")) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
