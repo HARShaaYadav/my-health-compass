@@ -1,98 +1,64 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+﻿import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const BACKEND_BASE_URL = Deno.env.get("BACKEND_BASE_URL") || "http://localhost:5000";
+
+async function fetchWithRetries(url: string, init: RequestInit, maxRetries = 4) {
+  let attempt = 0;
+  while (true) {
+    const resp = await fetch(url, init);
+    if (resp.status !== 429 || attempt >= maxRetries) return resp;
+    const retryAfter = resp.headers.get("Retry-After");
+    const waitMs = retryAfter ? Math.max(1000, Number(retryAfter) * 1000) : Math.min(64000, Math.pow(2, attempt) * 1000);
+    console.warn(`Rate limited, retrying in ${waitMs}ms (attempt ${attempt + 1})`);
+    await new Promise((r) => setTimeout(r, waitMs));
+    attempt += 1;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { symptoms } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const payload = await req.json();
+    const response = await fetchWithRetries(`${BACKEND_BASE_URL}/api/ai/analyze-symptoms`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          {
-            role: "system",
-            content: `You are a medical symptom analysis AI. Analyze symptoms and return structured results. Be thorough but remind users this is not a diagnosis.`
-          },
-          {
-            role: "user",
-            content: `Analyze these symptoms: ${symptoms.join(", ")}. Return possible conditions with severity and recommended specialists.`
-          }
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "return_analysis",
-            description: "Return structured symptom analysis results",
-            parameters: {
-              type: "object",
-              properties: {
-                results: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      condition: { type: "string", description: "Possible medical condition" },
-                      severity: { type: "string", enum: ["low", "medium", "high"] },
-                      specialist: { type: "string", description: "Recommended medical specialist" },
-                      description: { type: "string", description: "Brief explanation in simple language" }
-                    },
-                    required: ["condition", "severity", "specialist", "description"],
-                    additionalProperties: false
-                  }
-                }
-              },
-              required: ["results"],
-              additionalProperties: false
-            }
-          }
-        }],
-        tool_choice: { type: "function", function: { name: "return_analysis" } }
-      }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       if (response.status === 402) {
         return new Response(JSON.stringify({ error: "AI usage limit reached." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 402,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       const t = await response.text();
-      console.error("AI error:", response.status, t);
-      throw new Error("AI service error");
-    }
-
-    const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (toolCall) {
-      const results = JSON.parse(toolCall.function.arguments);
-      return new Response(JSON.stringify(results), {
+      console.error("AI service error:", response.status, t);
+      return new Response(JSON.stringify({ error: "AI service error" }), {
+        status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    throw new Error("No structured response from AI");
+    const data = await response.text();
+    return new Response(data, { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {
     console.error("analyze-symptoms error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

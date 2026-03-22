@@ -5,79 +5,48 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const BACKEND_BASE_URL = Deno.env.get("BACKEND_BASE_URL") || "http://localhost:5000";
+
+async function fetchWithRetries(url: string, init: RequestInit, maxRetries = 4) {
+  let attempt = 0;
+  while (true) {
+    const resp = await fetch(url, init);
+    if (resp.status !== 429 || attempt >= maxRetries) return resp;
+
+    const retryAfter = resp.headers.get("Retry-After");
+    const waitMs = retryAfter ? Math.max(1000, Number(retryAfter) * 1000) : Math.min(64000, Math.pow(2, attempt) * 1000);
+    console.warn(`Rate limited, retrying in ${waitMs}ms (attempt ${attempt + 1})`);
+    await new Promise((r) => setTimeout(r, waitMs));
+    attempt += 1;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
     const { messages } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY is not configured");
 
-    // Transform messages to support multi-modal content (text + images)
-    const transformedMessages = messages.map((msg: any) => {
-      // If message has imageBase64, build multi-modal content array
-      if (msg.imageBase64) {
-        const parts: any[] = [];
-        if (msg.content) {
-          parts.push({ type: "text", text: msg.content });
-        }
-        parts.push({
-          type: "image_url",
-          image_url: {
-            url: `data:${msg.mimeType || "image/jpeg"};base64,${msg.imageBase64}`,
-          },
-        });
-        return { role: msg.role, content: parts };
-      }
-      return { role: msg.role, content: msg.content };
-    });
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetchWithRetries(`${BACKEND_BASE_URL}/api/ai/chat`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          {
-            role: "system",
-            content: `You are MedExplain AI, a helpful medical information assistant. You help users understand health topics in simple, clear language.
-
-IMPORTANT RULES:
-- Always explain medical concepts in plain, easy-to-understand language
-- When appropriate, suggest which type of specialist to consult
-- NEVER provide a definitive diagnosis
-- ALWAYS remind users to consult their doctor for medical decisions
-- Use markdown formatting for clarity (bold, lists, etc.)
-- Be empathetic and reassuring but factually accurate
-- If symptoms sound urgent (chest pain, difficulty breathing, stroke symptoms), advise seeking immediate emergency care
-- When images are shared, analyze them carefully and provide helpful medical information
-- For skin conditions, rashes, or visible symptoms in images, describe what you observe and suggest possible conditions and specialists
-- Always clarify that image-based analysis is not a substitute for in-person examination`
-          },
-          ...transformedMessages,
-        ],
-        stream: true,
-      }),
+      body: JSON.stringify({ messages }),
     });
 
     if (!response.ok) {
       if (response.status === 429) {
         return new Response(JSON.stringify({ error: "Rate limit exceeded. Please try again in a moment." }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI usage limit reached. Please add credits." }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
       const t = await response.text();
-      console.error("AI gateway error:", response.status, t);
+      console.error("Backend AI chat error:", response.status, t);
       return new Response(JSON.stringify({ error: "AI service error" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
@@ -87,7 +56,8 @@ IMPORTANT RULES:
   } catch (e) {
     console.error("chat error:", e);
     return new Response(JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 });

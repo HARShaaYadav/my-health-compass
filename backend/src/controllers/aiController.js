@@ -39,7 +39,7 @@ function getSystemInstruction(messages) {
 // Retry with backoff on 429
 async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-async function callGemini(messages, { stream = false, tools = null, retries = 2 } = {}) {
+async function callGemini(messages, { stream = false, tools = null, retries = 8 } = {}) {
   const key = getApiKey();
   const endpoint = stream
     ? `${GEMINI_BASE}/${MODEL_STREAM}:streamGenerateContent?alt=sse&key=${key}`
@@ -65,17 +65,30 @@ async function callGemini(messages, { stream = false, tools = null, retries = 2 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     console.error("Gemini error:", response.status, text);
+
     if (response.status === 429) {
       if (retries > 0) {
-        console.log(`Rate limited, retrying in 3s... (${retries} left)`);
-        await sleep(3000);
+        const retryAfterHeader = response.headers.get("Retry-After");
+        const baseDelay = retryAfterHeader ? Math.max(1000, parseInt(retryAfterHeader, 10) * 1000) : Math.min(64000, Math.pow(2, 8 - retries) * 1000);
+        const jitter = Math.floor(Math.random() * 500);
+        const delayMs = baseDelay + jitter;
+        console.log(`Rate limited, retrying in ${delayMs}ms... (${retries} retries left)`);
+        await sleep(delayMs);
         return callGemini(messages, { stream, tools, retries: retries - 1 });
       }
-      throw Object.assign(new Error("Rate limit exceeded. Please wait a moment and try again."), { status: 429 });
+      const finalErr = new Error("Rate limit exceeded. Please wait a moment and try again.");
+      finalErr.status = 429;
+      throw finalErr;
     }
-    if (response.status === 400) throw Object.assign(new Error("Invalid request to AI service."), { status: 400 });
+
+    if (response.status === 400) {
+      const err = new Error("Invalid request to AI service.");
+      err.status = 400;
+      throw err;
+    }
     throw new Error("AI service error");
   }
+
   return response;
 }
 

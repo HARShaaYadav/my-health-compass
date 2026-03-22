@@ -45,10 +45,10 @@ app.use(cors({
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
-// Global rate limiter — 500 req / 15 min per IP
+// Global rate limiter — 1000 req / 15 min per IP (increase for heavier usage)
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 500,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later." },
@@ -58,7 +58,18 @@ app.use(rateLimit({
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { error: "Too many auth attempts, please try again later." },
+});
+
+// AI endpoints are expensive; allow moderate burst with provider-safe behavior
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many AI requests, please try again in a minute." },
 });
 
 // Routes
@@ -71,7 +82,7 @@ app.use("/api/prescriptions", require("./routes/prescriptions"));
 app.use("/api/symptom-checks", require("./routes/symptomChecks"));
 app.use("/api/consultations", require("./routes/consultations"));
 app.use("/api/chat", require("./routes/chat"));
-app.use("/api/ai", require("./routes/ai"));
+app.use("/api/ai", aiLimiter, require("./routes/ai"));
 
 // Health check
 app.get("/api/health", (_, res) => res.json({ status: "ok", env: process.env.NODE_ENV }));
